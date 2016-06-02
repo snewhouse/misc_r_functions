@@ -17,3 +17,16 @@ create_samples <- function(data,nsamples,trait){
     return(resamps)
 }
 
+######################################################
+# smotest perc.over = 100, perc.under=200
+#
+smotest <- list(name = "SMOTE balanced 100 200",
+                func = function (x, y) {
+                  library(DMwR)
+                  dat <- if (is.data.frame(x)) x else as.data.frame(x)
+                  dat$.y <- y
+                  dat <- SMOTE(.y ~ ., data = dat, perc.over = 100, perc.under=200)
+                  list(x = dat[, !grepl(".y", colnames(dat), fixed = TRUE)],
+                       y = dat$.y)
+                  },
+                first = TRUE)
