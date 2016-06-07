@@ -12,7 +12,9 @@ gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
 # alpha 0 = ridge
 # alpha 0.5 = elastic net
 # aplna 1.0 = lasso
-#
+# The elastic-net penalty is controlled by αα, and bridges 
+# the gap between lasso (α=1α=1, the default) and ridge (α=0α=0). 
+# The tuning parameter λ controls the overall strength of the penalty.
 lasso_grid_caret <- function(data, aplha_seq=seq(0, 1, 0.5) , lambda_length=100 ){
     require(caret)
     
