@@ -1,4 +1,12 @@
 ######################################################
+# gbm Grid: place holder
+#
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
+                        n.trees = (1:30)*50,
+                        shrinkage = c(0.01, 0.1, 1.0),
+                        n.minobsinnode = c(10,20))
+
+######################################################
 # lasso: grid tune parameters: set aplha and lambda
 # seq along 100 values of lambda
 # alpha 0 = ridge
