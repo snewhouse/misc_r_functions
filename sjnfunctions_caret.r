@@ -1,3 +1,26 @@
+######################################################
+# lasso: grid tune parameters: set aplha and lambda
+# seq along 100 values of lambda
+# alpha 0 = ridge
+# alpha 0.5 = elastic net
+# aplna 1.0 = lasso
+#
+lasso_grid_caret <- function(data, aplha_seq=seq(0, 1, 0.5) , lambda_length=100 ){
+    require(caret)
+    
+    aplha_seq <- aplha_seq
+    lambda_length <- lambda_length
+    
+    nobs <- length(data[1,])
+    nvars <- length(data[,1])
+    min_lambda <- ifelse(nobs<nvars,0.01,0.0001)
+    max_lambda <- 0.1
+    lamda_seq <- seq(min_lambda, max_lambda, length.out=lambda_length)
+    
+    glmnet_grid <- expand.grid(alpha=aplha_seq,
+                           lambda=lamda_seq)
+    glmnet_grid
+}
 
 ######################################################
 # create re samples for caret
