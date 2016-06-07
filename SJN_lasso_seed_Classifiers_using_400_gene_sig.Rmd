@@ -1,0 +1,319 @@
+---
+title: 'ML-playbook: Dan L Data. Testing Lasso (glmnet), Stability'
+author: "Dr Stephen J Newhouse"
+date: "2 December 2015"
+output:
+  html_document:
+    theme: default
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+#Load Packages
+```{r loadlibs, message=FALSE, error=FALSE, }
+# load the library
+rm(list=ls());gc()
+library("knitr")
+library("rmarkdown")
+library("flexdashboard")
+library("e1071")
+library("earth")
+library("caret")
+library("gbm")
+library("foreach")
+library("doParallel")
+library("magrittr")
+library("plyr")
+library("randomForest")
+library("pROC")
+library("ipred")
+library("kernlab")
+library("ISLR")
+library("tree")
+## cores (SJN addition)
+library("doMC")
+registerDoMC(cores = 6)
+# source my stuff
+source("https://raw.githubusercontent.com/snewhouse/misc_r_functions/master/sjnfunctions_caret.r")
+```
+
+# DL Data 
+Playing with Dan's data. Psychosis cohort, blood gene expression.
+
+Want to see how `glmnet` performs under different `seeds`. Stability selecion of 
+predictors. Which core set are chosen more often than not? more soon...
+
+```{r datadirs, echo=FALSE, message=FALSE, error=FALSE}
+datadir <-"../Data"
+resultdir <-"./Results"
+```
+
+
+##Load Data
+
+Dan's list of 400 genes. 
+
+```{r load_raw_data}
+setwd(datadir)
+data400<-read.csv("../Data/GAP_Gene_expression_dataframe_400_gene_Lee_list.csv")
+## Data Massage
+data400 <- data400 %>%  dplyr:::select(-X) %>% 
+    mutate(Phenotype=factor(Phenotype, levels=c("CONTROL","CASE")))
+
+data400 %>% dplyr:::group_by(Phenotype) %>% 
+    dplyr:::select(Phenotype) %>% 
+    dplyr:::summarise(N=n()) %>% 
+    kable()
+```
+
+
+# trainControl Configs
+
+Using `caret` package. Plan testing a range of settings at some point. most code below is 
+a place holder for later explorations.
+
+## Test Conditions 1
+- start with `repeatedcv`  
+- summaryFunction: `twoClassSummary`   
+- metric : `ROC`  
+- `selectionFunction = "best"`  
+- K: 5
+- rpt: 20  
+- 100 times  
+- seeds `seq(1,30)`  
+- preProcess=c("center", "scale")  
+- tuneLength = 3  
+
+At some point I want to look at sampling the test population 100 times (with replacement)
+then submitting each random sample to repeatedcv for model building and then recording all results. 
+
+
+```{r trainControl_settings}
+###############################################################################
+# prepare training scheme
+# control_2class_down
+
+# bootstrapping 
+n_boot <- 100
+
+# cv
+Kfold <- 5
+nrpt <- 20
+
+# balance method
+balance_method <- "down"
+
+# summary fucnction
+summary_function <- twoClassSummary
+
+control_ml <- trainControl(method="repeatedcv", 
+                       number=Kfold, 
+                       repeats=nrpt, 
+                       summaryFunction=summary_function,
+                       sampling=balance_method,
+                       selectionFunction = "best",
+                       returnResamp = "all",
+                       returnData = TRUE,
+                       savePredictions="all",
+                       classProbs=TRUE,
+                       allowParallel=TRUE)
+
+
+# "boot632"
+# selectionFunction best, oneSE, tolerance
+#The function getTrainPerf returns a one row data frame with the resampling results for the chosen model. The statistics will have the prefix "Train" (i.e. "TrainROC"). There is also a column called "method" that echoes the argument of the call to trainControl of the same name.
+```
+
+## Lasso (glmnet)
+
+Big fan of this and its fast. I'm not splitting dataset here. I think its too small.
+Some disagree. I will do a comparison of performance between split v no split with groups less 1000, 500 
+and 100 soon. Bootstrapping and repeated CV should help really (I hope).
+
+Loop throught different seeds and see how it all changes. seeds `seq(1,30)`  
+
+
+```{r fit_glmnet, message=FALSE, error=FALSE, cache=TRUE, fig.width=10, fig.height=10, results='markup'}
+#############################################################################
+# set i, seed 1 for testing
+i <- 1
+n_seeds <- 2 # n times to loop through data
+
+
+#############################################################################
+# lasso grid
+# lasso: Alpha = 1 represents lasso regression, 
+# Alpha close to 0 approaches ridge regression
+
+tgrid <- lasso_grid_caret(data400, aplha_seq=seq(0, 1, 0.1),lambda_length=100)
+dim(tgrid)
+
+#############################################################################
+# make empty data frames
+train_performance <- data.frame()
+preds <- list()
+genes <- NULL
+seed_base <- 1234
+```
+
+
+```{r, start_loop_train}
+#############################################################################
+# start loop : change seed with each iteration 
+for( i in seq(1,n_seeds)) {
+
+    # set seed
+    my_seed <- sample(1234:9999,1)
+    set.seed(my_seed)
+    cat("\r\n", "SEED:" ,print(my_seed),"\r\n")
+    
+    ## Select perfomramce 
+    p_metric <- "Accuracy" # defaultSummary    
+    p_metric <- "ROC" # defaultSummary    
+
+#############################################################################
+## ML traning
+
+# set trait (outcome) you want to predict
+my_trait <- "Phenotype"
+
+# make model forula for train() 
+ml_model <- as.formula(paste(my_trait,"~ ."))
+
+# set ml data set
+# for N class 
+# if N samples < 500 in smallest class then we will not split into test and training
+# for contious variables if N samples < 500 then we will not split into test and training
+
+ml_data <- data400
+ml_data_train <- data400
+ml_data_test <- ml_data_train
+if( my_trait %in% names(ml_data)=="FALSE" ) { stop("Cant find trait: [",my_trait, "] in data ") }
+trait_type <- ifelse( length(levels(ml_data_train[,my_trait]))==2 ,"two_class", "multi_class" )
+
+# tree quickee
+m_tree <- tree(ml_model, data=ml_data)
+plot(m_tree);text(m_tree)
+
+# caret : train
+fit_glmnet <- train(ml_model , 
+                    data=ml_data_train,
+                    method="glmnet",
+                    preProcess=c("center", "scale"),
+                    trControl=control_ml,
+                    metric=p_metric,
+                    tuneGrid=tgrid)
+
+# pre-processing methods are limited to: 
+#
+# BoxCox, YeoJohnson, expoTrans, center, scale, range, knnImpute, 
+# bagImpute, medianImpute, pca, ica, spatialSign, ignore, keep, remove, zv, 
+# nzv, conditionalX
+
+#############################################################################
+## plot tunning 
+print(plot(fit_glmnet))
+
+## plot tunning over samples
+plot_tunning_resamples="NO"
+
+if(plot_tunning_resamples=="YES") {
+print(stripplot(fit_glmnet))
+print(densityplot(fit_glmnet))    
+}
+
+#############################################################################
+## results
+print(fit_glmnet)
+
+# predictors
+selected_vars <- predictors(fit_glmnet)
+print(length(selected_vars))
+print(selected_vars)
+print(varImp(fit_glmnet))
+
+# save gene lists
+myseed <- paste("seed:",i, sep="")
+tmp <- list(selected_vars)
+preds[myseed] <- tmp
+preds
+rm("tmp")
+# save emm
+genes <- append(genes,selected_vars)
+
+# getTrainPerf
+perf_i <- getTrainPerf(fit_glmnet)
+perf_i$seed <- my_seed
+train_performance <- rbind(train_performance,perf_i)
+train_performance
+rm("perf_i")
+
+#############################################################################
+## fit model on orginal data
+predict_orginal <- predict(fit_glmnet, ml_data_train)
+
+## get stats
+conf_matrix <- confusionMatrix(predict_orginal, ml_data_train$Phenotype, positive="CASE")
+print(conf_matrix)
+
+## pred probs
+pred_probs <- predict(fit_glmnet, ml_data_train, type="prob")
+
+## AUC 
+auc <- roc(ml_data_train$Phenotype, pred_probs$CASE, levels=c("CONTROL", "CASE"))
+print(auc)
+auc_ci <- ci(auc)
+print(auc_ci)
+
+## ROC CURVE
+plot.roc(auc, print.thres=TRUE, print.auc=TRUE)
+
+}
+```
+
+## Performance results
+
+```{r}
+kable(train_performance)
+
+ggplot(data=train_performance, aes(x=seed, y=TrainSens)) +
+    geom_line()
+
+```
+
+## Gene Counts
+
+How many times is this gene selected from the different `seed` runs. 
+
+```{r count_genes, message=FALSE, error=FALSE, cache=TRUE, fig.width=10, fig.height=20, results='markup'}
+
+gene_counts <- as.data.frame(table(genes))
+gene_counts <- gene_counts[order(gene_counts$Freq,decreasing = TRUE),]
+gene_counts$genes <- factor(gene_counts$genes,
+                            levels=gene_counts$genes[order(gene_counts$Freq,decreasing = FALSE)] )
+
+gene_counts[1:20,]
+
+tab_plot <- data.frame(genes=gene_counts$genes,Freq=gene_counts$Freq)
+rownames(tab_plot) <- tab_plot$genes
+tab_plot[1:20,]
+gnames <- rownames(tab_plot)
+
+ggplot(data=tab_plot[1:20,], 
+       aes(x=genes, y=Freq),
+       ylab(gnames[1:20,])) +
+    geom_bar(stat="identity",colour="black",fill="blue") +
+    coord_flip()
+
+```
+
+
+
+
+
+
+********************************************************************************
