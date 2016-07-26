@@ -5,6 +5,13 @@ se_hat <- function(ci_l, ci_u) {
     SE <- (ci_u - ci_l) / 3.92
     return(SE)
 }
+######################################################
+# calc Z from Effect Size (ES) and Standard Error (SE)
+#
+z_hat <- function(es, se) {
+    z <- es / se
+    return(z)
+}
 
 ######################################################
 # gbm Grid: place holder
