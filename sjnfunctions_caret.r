@@ -1,4 +1,12 @@
 ######################################################
+# calc se from 95% CI
+#
+se_hat <- function(ci_l, ci_u) {
+    SE <- (ci_u - ci_l) / 3.92
+    return(SE)
+}
+
+######################################################
 # gbm Grid: place holder
 #
 gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
